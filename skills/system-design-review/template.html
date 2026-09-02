@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>System Design Review</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.5.0/dist/tabler-icons.min.css">
+<style>
+  :root {
+    --bg: #07090f;
+    --bg-grid: rgba(120, 160, 220, 0.035);
+    --panel: #111824;
+    --panel-2: #0d131e;
+    --edge: rgba(140, 170, 220, 0.14);
+    --edge-strong: rgba(150, 175, 220, 0.34);
+    --text: #e8eef7;
+    --text-dim: #93a1b6;
+    --text-faint: #5a6780;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+    /* edge-kind palette */
+    --k-sync: #8a98ad;
+    --k-async: #6aa0ff;
+    --k-write: #c89bff;
+    --k-read: #5ad1e6;
+    --k-fail: #ff6b6b;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--sans); overflow: hidden; }
+  body {
+    background-image:
+      linear-gradient(var(--bg-grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--bg-grid) 1px, transparent 1px);
+    background-size: 34px 34px;
+  }
+  .app { height: 100vh; display: flex; flex-direction: column; }
+
+  /* ---- header ---- */
+  .head {
+    padding: 15px 26px 12px; border-bottom: 1px solid var(--edge);
+    display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap;
+    background: linear-gradient(180deg, rgba(255,255,255,0.015), transparent);
+  }
+  .head h1 { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+  .head .sub { font-size: 12.5px; color: var(--text-dim); max-width: 640px; line-height: 1.5; }
+  .head .eyebrow {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.18em;
+    text-transform: uppercase; color: var(--text-faint);
+    display: flex; align-items: center; gap: 7px;
+  }
+  .head .eyebrow .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: #3ddc97; box-shadow: 0 0 8px #3ddc97; animation: pulse-dot 2s ease-in-out infinite;
+  }
+  .head .scale {
+    margin-left: auto; font-family: var(--mono); font-size: 10.5px; color: var(--text-dim);
+    border: 1px solid var(--edge); background: var(--panel-2); border-radius: 8px;
+    padding: 6px 11px; display: flex; align-items: center; gap: 7px; max-width: 420px;
+  }
+  .head .scale i { color: #ffc14d; font-size: 13px; }
+  @keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+  /* ---- version tabs ---- */
+  .tabs { display: flex; gap: 8px; padding: 11px 26px; border-bottom: 1px solid var(--edge); overflow-x: auto; flex-shrink: 0; }
+  .tabs::-webkit-scrollbar { height: 0; }
+  .tab {
+    display: flex; align-items: center; gap: 9px; cursor: pointer;
+    padding: 8px 14px; border-radius: 10px; border: 1px solid var(--edge);
+    background: var(--panel-2); transition: all .2s; flex-shrink: 0; white-space: nowrap;
+  }
+  .tab:hover { border-color: var(--edge-strong); }
+  .tab.active { border-color: var(--tc, #6aa0ff); background: color-mix(in srgb, var(--tc, #6aa0ff) 12%, var(--panel-2)); }
+  .tab .vnum {
+    font-family: var(--mono); font-size: 11px; font-weight: 600;
+    width: 26px; height: 22px; display: grid; place-items: center; border-radius: 6px;
+    background: color-mix(in srgb, var(--tc, #6aa0ff) 18%, transparent); color: var(--tc, #6aa0ff);
+  }
+  .tab .vmeta { display: flex; flex-direction: column; gap: 1px; line-height: 1.2; }
+  .tab .vname { font-size: 12.5px; font-weight: 550; color: var(--text); }
+  .tab .vtag { font-size: 10px; color: var(--text-faint); }
+  .tab .vbadge {
+    font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.06em; text-transform: uppercase;
+    padding: 2px 6px; border-radius: 5px; margin-left: 2px;
+  }
+  .badge-here   { background: rgba(106,160,255,0.16); color: #8fb6ff; }
+  .badge-adopt  { background: rgba(61,220,151,0.16); color: #5fe0aa; }
+  .badge-defer  { background: rgba(255,193,77,0.16); color: #ffce6b; }
+  .badge-target { background: rgba(200,155,255,0.18); color: #d3b0ff; }
+
+  /* ---- main split ---- */
+  .body { flex: 1; display: flex; min-height: 0; }
+
+  /* ---- stage (pannable canvas) ---- */
+  .stage-wrap { flex: 1; overflow: auto; position: relative; cursor: grab; }
+  .stage-wrap.grabbing { cursor: grabbing; }
+  .stage-wrap::-webkit-scrollbar { width: 9px; height: 9px; }
+  .stage-wrap::-webkit-scrollbar-thumb { background: var(--edge-strong); border-radius: 5px; }
+  .stage-wrap::-webkit-scrollbar-track { background: transparent; }
+  .stage { position: relative; }
+  .stage.fading { opacity: 0; }
+  .stage-inner { position: absolute; inset: 0; transition: opacity .28s ease; }
+
+  .edges-svg { position: absolute; inset: 0; z-index: 2; pointer-events: none; overflow: visible; }
+  .edge-path { fill: none; stroke-width: 2; }
+  .edge-path.anim { stroke-dasharray: 7 6; animation: march 1s linear infinite; }
+  @keyframes march { to { stroke-dashoffset: -13; } }
+  .edge-head { stroke: none; }
+
+  /* group box */
+  .group {
+    position: absolute; z-index: 1; border-radius: 20px;
+    border: 1.5px dashed var(--gc, var(--edge-strong));
+    background: color-mix(in srgb, var(--gc, #5ad1e6) 5%, transparent);
+  }
+  .group .glabel {
+    position: absolute; top: -10px; left: 50%; transform: translateX(-50%);
+    font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--gc, var(--text-dim)); background: var(--bg); padding: 1px 10px; white-space: nowrap;
+  }
+
+  /* node */
+  .node {
+    position: absolute; z-index: 3; width: 132px;
+    transform: translate(-50%, -50%);
+    display: flex; flex-direction: column; align-items: center; cursor: pointer;
+  }
+  .node .card {
+    width: 96px; height: 96px; border-radius: 22px;
+    border: 2px solid var(--c, #6aa0ff);
+    background:
+      radial-gradient(120% 120% at 50% 0%, color-mix(in srgb, var(--c) 20%, transparent), transparent 70%),
+      var(--panel);
+    display: grid; place-items: center;
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--c) 20%, transparent), 0 6px 22px rgba(0,0,0,0.45);
+    transition: transform .2s, box-shadow .2s;
+  }
+  .node .card i { font-size: 40px; color: var(--c, #6aa0ff); filter: drop-shadow(0 0 10px color-mix(in srgb, var(--c) 55%, transparent)); }
+  .node:hover .card { transform: translateY(-3px); }
+  .node.sel .card { box-shadow: 0 0 0 2px var(--c), 0 0 26px color-mix(in srgb, var(--c) 45%, transparent); }
+  .node.is-new .card { animation: newpulse 2.4s ease-in-out infinite; }
+  @keyframes newpulse {
+    0%,100% { box-shadow: 0 0 0 1px color-mix(in srgb, var(--c) 30%, transparent), 0 6px 22px rgba(0,0,0,.45); }
+    50%     { box-shadow: 0 0 0 2px var(--c), 0 0 30px color-mix(in srgb, var(--c) 55%, transparent); }
+  }
+  .node .newtag {
+    position: absolute; top: -8px; right: 8px; z-index: 4;
+    font-family: var(--mono); font-size: 8px; letter-spacing: 0.1em; font-weight: 700;
+    background: var(--c); color: #07090f; padding: 2px 6px; border-radius: 5px;
+  }
+  .node .nlabel {
+    margin-top: 10px; font-size: 12.5px; font-weight: 600; text-align: center;
+    letter-spacing: 0.02em; color: var(--text); line-height: 1.2; max-width: 132px;
+  }
+  .node .nsub { margin-top: 3px; font-family: var(--mono); font-size: 10px; color: var(--c); text-align: center; opacity: 0.85; }
+
+  /* edge label */
+  .edge-label {
+    position: absolute; z-index: 4; transform: translate(-50%, -50%);
+    font-family: var(--mono); font-size: 10px; color: var(--text);
+    background: var(--panel); border: 1px solid var(--el, var(--edge-strong));
+    border-radius: 999px; padding: 3px 9px; white-space: nowrap; pointer-events: none;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.35);
+  }
+
+  /* ---- side panel ---- */
+  .panel { width: 358px; flex-shrink: 0; border-left: 1px solid var(--edge); background: var(--panel-2); display: flex; flex-direction: column; overflow-y: auto; }
+  .panel-inner { padding: 22px 22px 30px; }
+  .p-eyebrow { font-family: var(--mono); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--text-faint); display: flex; align-items: center; gap: 8px; }
+  .p-verdict { display: inline-flex; align-items: center; gap: 7px; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.04em; text-transform: uppercase; padding: 6px 11px; border-radius: 8px; margin: 12px 0 16px; }
+  .p-title { font-size: 21px; font-weight: 650; line-height: 1.2; letter-spacing: -0.015em; }
+  .p-tag { font-size: 12.5px; color: var(--text-faint); margin-top: 4px; margin-bottom: 18px; }
+  .p-sec { margin-bottom: 16px; }
+  .p-sec .lab { font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 7px; display: flex; align-items: center; gap: 7px; }
+  .p-sec .txt { font-size: 13.5px; line-height: 1.6; color: var(--text-dim); }
+  .lab-adds  { color: #5fe0aa; }
+  .lab-break { color: #ff8585; }
+  .lab-new   { color: #ffce6b; }
+  .lab-verd  { color: #d3b0ff; }
+  .p-note { margin-top: 4px; font-size: 13px; line-height: 1.6; color: var(--text); border-left: 2px solid var(--c, var(--edge-strong)); padding-left: 12px; }
+  .p-hint { margin-top: 22px; font-size: 11.5px; color: var(--text-faint); line-height: 1.5; border-top: 1px solid var(--edge); padding-top: 14px; }
+  .p-hint kbd { font-family: var(--mono); font-size: 10px; background: var(--panel); border: 1px solid var(--edge-strong); border-radius: 4px; padding: 1px 5px; }
+
+  /* summary/detail toggle */
+  .p-toggle { display: flex; gap: 4px; background: #0a1017; border: 1px solid var(--edge); border-radius: 10px; padding: 3px; margin-bottom: 18px; }
+  .p-toggle button { flex: 1; font-family: var(--mono); font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-dim); background: transparent; border: 0; border-radius: 7px; padding: 7px 0; cursor: pointer; transition: .15s; }
+  .p-toggle button.on { background: var(--panel); color: var(--text); box-shadow: 0 1px 6px rgba(0,0,0,.4); }
+  .p-toggle button:hover:not(.on) { color: var(--text); }
+
+  /* detail list */
+  .d-hint { font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-faint); margin-bottom: 11px; }
+  .d-item { border: 1px solid var(--edge); border-radius: 11px; padding: 11px 12px; margin-bottom: 9px; cursor: pointer; transition: .15s; background: var(--panel); }
+  .d-item:hover { border-color: var(--edge-strong); }
+  .d-item.sel { border-color: var(--c); box-shadow: 0 0 0 1px var(--c), 0 0 16px color-mix(in srgb, var(--c) 25%, transparent); }
+  .d-head { display: flex; align-items: center; gap: 9px; }
+  .d-ico { width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; flex-shrink: 0; background: color-mix(in srgb, var(--c) 16%, transparent); color: var(--c); border: 1px solid color-mix(in srgb, var(--c) 30%, transparent); }
+  .d-ico i { font-size: 15px; }
+  .d-name { font-size: 13px; font-weight: 600; color: var(--text); }
+  .d-sub { font-family: var(--mono); font-size: 10px; color: var(--c); opacity: .85; }
+  .d-badge { margin-left: auto; font-family: var(--mono); font-size: 8px; letter-spacing: .08em; text-transform: uppercase; padding: 2px 6px; border-radius: 5px; }
+  .d-new { background: color-mix(in srgb, var(--c) 22%, transparent); color: var(--c); }
+  .d-chg { background: rgba(255,193,77,0.16); color: #ffce6b; }
+  .d-note { font-size: 12.5px; line-height: 1.55; color: var(--text-dim); margin-top: 8px; }
+  .d-note.d-empty { color: var(--text-faint); }
+
+  /* ---- legend + footer ---- */
+  .controls { padding: 10px 26px; border-top: 1px solid var(--edge); display: flex; align-items: center; gap: 14px; background: var(--panel-2); }
+  .legend { display: flex; gap: 7px; flex-wrap: wrap; flex: 1; }
+  .legend .chip { display: flex; align-items: center; gap: 6px; font-size: 10.5px; font-family: var(--mono); color: var(--text-dim); padding: 3px 8px; border-radius: 7px; border: 1px solid var(--edge); background: var(--panel); }
+  .legend .chip i { font-size: 12px; }
+  .btn { display: flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 12px; color: var(--text); padding: 8px 13px; border-radius: 9px; border: 1px solid var(--edge-strong); background: var(--panel); cursor: pointer; transition: .2s; }
+  .btn:hover { background: #1a2435; border-color: #6aa0ff; }
+  .btn:disabled { opacity: 0.35; cursor: not-allowed; }
+  .btn i { font-size: 15px; }
+
+  @media (prefers-reduced-motion: reduce) { .edge-path.anim { animation: none; } .node.is-new .card { animation: none; } .stage-inner { transition: none; } }
+  @media (max-width: 820px) { .panel { display: none; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="head">
+    <div style="display:flex; flex-direction:column; gap:6px;">
+      <span class="eyebrow"><span class="dot"></span><span>system design review</span></span>
+      <h1 id="r-title">—</h1>
+    </div>
+    <p class="sub" id="r-summary"></p>
+    <div class="scale"><i class="ti ti-gauge"></i><span id="r-scale"></span></div>
+  </div>
+
+  <div class="tabs" id="tabs"></div>
+
+  <div class="body">
+    <div class="stage-wrap" id="stage-wrap">
+      <div class="stage" id="stage">
+        <div class="stage-inner" id="stage-inner"></div>
+      </div>
+    </div>
+    <aside class="panel"><div class="panel-inner" id="panel-inner"></div></aside>
+  </div>
+
+  <div class="controls">
+    <button class="btn" id="prev" onclick="goVer(-1)"><i class="ti ti-arrow-left"></i>Prev</button>
+    <div class="legend" id="legend"></div>
+    <button class="btn" id="next" onclick="goVer(1)">Next<i class="ti ti-arrow-right"></i></button>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   SYSTEM REGISTRY — color + icon + label per system key.
+   Add a key here and legend + nodes + panel all pick it up.
+   Icons are Tabler names (https://tabler.io/icons), part after "ti-".
+   The system-design-review skill may append entries when a flow
+   uses a system not listed. Referenced by each node's `system`.
+   ============================================================ */
+const SYSTEMS = {
+  /* generic layers */
+  mobile:   { label: "Mobile app",   color: "#6aa0ff", icon: "ti-device-mobile" },
+  web:      { label: "Web frontend",  color: "#5ad1e6", icon: "ti-browser" },
+  backend:  { label: "Backend",       color: "#3ddc97", icon: "ti-server-2" },
+  service:  { label: "Service",       color: "#7be58a", icon: "ti-server-cog" },
+  worker:   { label: "Worker",        color: "#9be564", icon: "ti-subtask" },
+  cron:     { label: "Scheduler",     color: "#9be564", icon: "ti-clock-bolt" },
+  queue:    { label: "Queue",         color: "#ffc14d", icon: "ti-list-check" },
+  dlq:      { label: "Dead letter q", color: "#ff6b6b", icon: "ti-inbox-off" },
+  cache:    { label: "Cache",         color: "#ff7a7a", icon: "ti-stack-2" },
+  lb:       { label: "Load balancer", color: "#a98bff", icon: "ti-arrows-split-2" },
+  cdn:      { label: "CDN / edge",    color: "#5ad1e6", icon: "ti-world-bolt" },
+  external: { label: "External",      color: "#8a98ad", icon: "ti-world" },
+
+  /* frameworks / runtimes */
+  expo:     { label: "Expo",          color: "#6aa0ff", icon: "ti-device-mobile" },
+  react:    { label: "React",         color: "#61dafb", icon: "ti-brand-react" },
+  next:     { label: "Next.js",       color: "#cdd3de", icon: "ti-brand-nextjs" },
+  fastify:  { label: "Fastify",       color: "#7be58a", icon: "ti-bolt" },
+  express:  { label: "Express",       color: "#9be564", icon: "ti-server-2" },
+  node:     { label: "Node.js",       color: "#7fd171", icon: "ti-brand-nodejs" },
+  lambda:   { label: "Lambda / fn",   color: "#ff9d4d", icon: "ti-square-rounded-letter-f" },
+
+  /* databases / ORMs / stores */
+  postgres: { label: "PostgreSQL",    color: "#c89bff", icon: "ti-database" },
+  replica:  { label: "Read replica",  color: "#b38cff", icon: "ti-database-export" },
+  outbox:   { label: "Outbox table",  color: "#ff8fc7", icon: "ti-table" },
+  mysql:    { label: "MySQL",         color: "#7aa6ff", icon: "ti-database" },
+  mongodb:  { label: "MongoDB",       color: "#5fd58a", icon: "ti-leaf" },
+  redis:    { label: "Redis",         color: "#ff7a7a", icon: "ti-stack-2" },
+  prisma:   { label: "Prisma",        color: "#b38cff", icon: "ti-layers-linked" },
+  search:   { label: "Search index",  color: "#66d6b5", icon: "ti-search" },
+
+  /* BaaS / auth */
+  firebase: { label: "Firebase",      color: "#ffb454", icon: "ti-flame" },
+  auth:     { label: "Auth",          color: "#ffb454", icon: "ti-lock" },
+
+  /* storage / CDN */
+  r2:       { label: "Cloudflare R2", color: "#ffa94d", icon: "ti-cloud" },
+  s3:       { label: "AWS S3",        color: "#ff9d4d", icon: "ti-cloud" },
+  storage:  { label: "Object store",  color: "#ffa94d", icon: "ti-cloud" },
+
+  /* third-party */
+  sqs:      { label: "Amazon SQS",    color: "#ff8fc7", icon: "ti-messages" },
+  kafka:    { label: "Kafka",         color: "#cdd3de", icon: "ti-topology-star-3" },
+  email:    { label: "Email service", color: "#5ad1e6", icon: "ti-mail" },
+  push:     { label: "Push notifs",   color: "#6aa0ff", icon: "ti-bell" },
+  stripe:   { label: "Stripe",        color: "#9b8cff", icon: "ti-credit-card" },
+  posthog:  { label: "PostHog",       color: "#ffc14d", icon: "ti-chart-dots" },
+  external_api: { label: "3rd-party API", color: "#8a98ad", icon: "ti-plug-connected" }
+};
+
+/* ============================================================
+   REVIEW DATA — the skill replaces this object with its output.
+   Sample below = the mobile sign-up / background-job flow, 4 versions.
+   ============================================================ */
+const REVIEW = {
+  "review_title": "Mobile sign-up + welcome email",
+  "summary": "A user signs up and must get a welcome email. This review evolves the flow from a naive synchronous call into a durable, at-least-once background job pipeline.",
+  "target_scale": "Next 10x: ~50k DAU, ~2k signups/day, spiky (launch/press) up to ~300 concurrent signups.",
+  "grounding": { "current_version": 1, "notes": "Illustrative sample. In a real run this maps to your actual signup route + notification path with file:line citations." },
+  "systems": ["mobile", "backend", "postgres", "outbox", "queue", "worker", "email", "dlq"],
+  "versions": [
+    {
+      "id": 1, "name": "Naive synchronous", "tagline": "Everything in the request",
+      "adds": "The signup request creates the account, then calls the email provider and waits for it to send before confirming to the user. One request, done top to bottom.",
+      "breaks": "The email provider takes ~2s on a slow day, or is down. The user stares at a spinner, and if the email fails the whole signup fails. Under a launch spike (~300 concurrent signups) every API worker is blocked waiting on email.",
+      "new_problem": "User-facing latency and failure are coupled to a slow third-party you don't control.",
+      "verdict": { "status": "here-today", "note": "Fine at low volume, but this is exactly the coupling that bites during your first press/launch spike." },
+      "nodes": [
+        { "id": "app", "system": "mobile", "label": "Mobile app", "sublabel": "(user)", "x": 1.5, "y": 0, "note": "Signup screen collects details and calls the API." },
+        { "id": "acct", "system": "backend", "label": "account_setup", "x": 0, "y": 1.2, "note": "Creates the account and, in this version, also drives the email inline." },
+        { "id": "db", "system": "postgres", "label": "Database", "x": 3, "y": 1.2, "note": "Stores the user row." },
+        { "id": "email", "system": "email", "label": "Send email", "x": 1.5, "y": 2.5, "note": "Third-party email provider. Slow or flaky, and you block on it here." }
+      ],
+      "edges": [
+        { "from": "app", "to": "acct", "label": "submit", "kind": "sync" },
+        { "from": "acct", "to": "db", "label": "save account", "kind": "write" },
+        { "from": "acct", "to": "email", "label": "send + WAIT", "kind": "sync" },
+        { "from": "acct", "to": "app", "label": "confirm (blocked)", "kind": "sync" }
+      ]
+    },
+    {
+      "id": 2, "name": "Add a queue", "tagline": "Reply first, email later",
+      "adds": "The backend saves the account, immediately confirms to the user, and drops an email job onto a queue. A separate pool of workers drains the queue and sends emails. Signup now responds in milliseconds.",
+      "breaks": "Two separate writes: save the account, then enqueue the job. If the process crashes between them, the account exists but the job was never queued and the user never gets the email. A dual-write data-loss window.",
+      "new_problem": "No atomicity between the DB write and the queue write.",
+      "verdict": { "status": "adopt-now", "note": "Getting email off the request path is worth doing now. Start with a Postgres-backed queue (pg-boss / BullMQ on your existing Redis); no need for SQS at this scale." },
+      "nodes": [
+        { "id": "app", "system": "mobile", "label": "Mobile app", "sublabel": "(user)", "x": 1.5, "y": 0 },
+        { "id": "acct", "system": "backend", "label": "account_setup", "x": 0, "y": 1.2 },
+        { "id": "db", "system": "postgres", "label": "Database", "x": 3, "y": 1.2 },
+        { "id": "queue", "system": "queue", "label": "Queue", "x": 1.5, "y": 2.4, "status": "new", "note": "Buffers email jobs so the request doesn't wait." },
+        { "id": "worker", "system": "worker", "label": "Worker pool", "x": 0, "y": 3.6, "status": "new", "note": "Picks up jobs and calls the email provider off the request path." },
+        { "id": "email", "system": "email", "label": "Send email", "x": 3, "y": 3.6 }
+      ],
+      "edges": [
+        { "from": "app", "to": "acct", "label": "submit", "kind": "sync" },
+        { "from": "acct", "to": "db", "label": "save account", "kind": "write" },
+        { "from": "acct", "to": "app", "label": "confirm (fast)", "kind": "sync" },
+        { "from": "acct", "to": "queue", "label": "enqueue job", "kind": "async" },
+        { "from": "queue", "to": "worker", "label": "deliver", "kind": "async" },
+        { "from": "worker", "to": "email", "label": "send", "kind": "sync" }
+      ]
+    },
+    {
+      "id": 3, "name": "Transactional outbox", "tagline": "Atomic write + safe retries",
+      "adds": "Instead of writing to the queue directly, the account write and an outbox-table row are committed in ONE database transaction. A separate relay reads the outbox and pushes to the queue. The queue uses a visibility timeout: a job is hidden (not deleted) while a worker runs, and reappears if the worker crashes.",
+      "breaks": "Visibility timeout gives at-least-once delivery: if a worker sends the email then crashes before deleting the job, the job reappears and a second worker sends a duplicate welcome email.",
+      "new_problem": "At-least-once means duplicate side effects are now possible.",
+      "verdict": { "status": "adopt-now", "note": "The outbox is just a table + the relay can be your existing cron/worker. This is the single highest-leverage reliability fix and it needs no new infrastructure." },
+      "nodes": [
+        { "id": "app", "system": "mobile", "label": "Mobile app", "sublabel": "(user)", "x": 1.5, "y": 0 },
+        { "id": "acct", "system": "backend", "label": "account_setup", "x": 0, "y": 1.2 },
+        { "id": "db", "system": "postgres", "label": "Database", "x": 3, "y": 1.1 },
+        { "id": "outbox", "system": "outbox", "label": "Outbox table", "x": 3, "y": 2.05, "status": "new", "note": "Written in the same transaction as the account. Either both commit or neither does." },
+        { "id": "relay", "system": "cron", "label": "Relay", "sublabel": "separate process", "x": 1.5, "y": 2.4, "status": "new", "note": "Polls the outbox and pushes jobs to the queue. Can be your existing scheduled worker." },
+        { "id": "queue", "system": "queue", "label": "Queue", "sublabel": "visibility timeout", "x": 0, "y": 3.5, "status": "changed", "note": "Hides a job while a worker holds it; reappears on crash so nothing is lost." },
+        { "id": "worker", "system": "worker", "label": "Worker pool", "x": 1.5, "y": 3.5 },
+        { "id": "email", "system": "email", "label": "Send email", "x": 3, "y": 3.5 }
+      ],
+      "edges": [
+        { "from": "app", "to": "acct", "label": "submit", "kind": "sync" },
+        { "from": "acct", "to": "db", "label": "save account", "kind": "write" },
+        { "from": "acct", "to": "outbox", "label": "write job", "kind": "write" },
+        { "from": "acct", "to": "app", "label": "confirm", "kind": "sync" },
+        { "from": "outbox", "to": "relay", "label": "poll", "kind": "read" },
+        { "from": "relay", "to": "queue", "label": "push", "kind": "async" },
+        { "from": "queue", "to": "worker", "label": "lease 30s", "kind": "async" },
+        { "from": "worker", "to": "email", "label": "send", "kind": "sync" }
+      ],
+      "groups": [ { "label": "One transaction", "nodes": ["db", "outbox"], "kind": "transaction" } ]
+    },
+    {
+      "id": 4, "name": "Idempotent + dead-letter", "tagline": "No dupes, no silent failures",
+      "adds": "Each job carries a unique id; a worker records completed ids and skips any it has already processed, so a redelivered job is a no-op (idempotent). Jobs that keep failing (bad address, unreachable) are retried a few times, then parked in a dead-letter queue for a human to inspect and replay.",
+      "new_problem": "Operationally you now need alerting on DLQ depth so parked failures don't sit unnoticed.",
+      "verdict": { "status": "target", "note": "This is the right end-state for the next 10x: durable, exactly-once-effect, observable. A dedicated SQS+Lambda/Kafka rebuild is a later concern, only past ~thousands of jobs/min." },
+      "nodes": [
+        { "id": "app", "system": "mobile", "label": "Mobile app", "sublabel": "(user)", "x": 1.5, "y": 0 },
+        { "id": "acct", "system": "backend", "label": "account_setup", "x": 0, "y": 1.2 },
+        { "id": "db", "system": "postgres", "label": "Database", "x": 3, "y": 1.1 },
+        { "id": "outbox", "system": "outbox", "label": "Outbox table", "x": 3, "y": 2.05, "note": "Same transaction as the account." },
+        { "id": "relay", "system": "cron", "label": "Relay", "sublabel": "separate process", "x": 1.5, "y": 2.4 },
+        { "id": "queue", "system": "queue", "label": "Queue", "sublabel": "visibility timeout", "x": 0, "y": 3.5 },
+        { "id": "worker", "system": "worker", "label": "Worker", "sublabel": "idempotent", "x": 1.5, "y": 3.5, "status": "changed", "note": "Skips any job id it has already completed, so redelivery is safe." },
+        { "id": "email", "system": "email", "label": "Send email", "x": 3, "y": 3.5 },
+        { "id": "dlq", "system": "dlq", "label": "Dead letter queue", "x": 1.5, "y": 4.7, "status": "new", "note": "Parking lot for jobs that fail ~5x. A human inspects, fixes, and replays. Alert on its depth." }
+      ],
+      "edges": [
+        { "from": "app", "to": "acct", "label": "submit", "kind": "sync" },
+        { "from": "acct", "to": "db", "label": "save account", "kind": "write" },
+        { "from": "acct", "to": "outbox", "label": "write job", "kind": "write" },
+        { "from": "acct", "to": "app", "label": "confirm", "kind": "sync" },
+        { "from": "outbox", "to": "relay", "label": "poll", "kind": "read" },
+        { "from": "relay", "to": "queue", "label": "push", "kind": "async" },
+        { "from": "queue", "to": "worker", "label": "lease", "kind": "async" },
+        { "from": "worker", "to": "email", "label": "send (id)", "kind": "sync" },
+        { "from": "worker", "to": "dlq", "label": "after 5 fails", "kind": "fail" }
+      ],
+      "groups": [ { "label": "One transaction", "nodes": ["db", "outbox"], "kind": "transaction" } ]
+    }
+  ]
+};
+
+/* ============================================================
+   RENDER
+   ============================================================ */
+const CELL_X = 210, CELL_Y = 175, PAD = 96, NODE_HW = 62, NODE_HH = 62;
+const KIND_COLOR = { sync: "var(--k-sync)", async: "var(--k-async)", write: "var(--k-write)", read: "var(--k-read)", fail: "var(--k-fail)" };
+const KIND_RAW   = { sync: "#8a98ad", async: "#6aa0ff", write: "#c89bff", read: "#5ad1e6", fail: "#ff6b6b" };
+const GROUP_COLOR = { transaction: "#5ad1e6", boundary: "#8a98ad", region: "#c89bff" };
+const BADGE = { "here-today": ["badge-here","You are here"], "adopt-now": ["badge-adopt","Adopt now"], "defer": ["badge-defer","Defer"], "target": ["badge-target","Target"] };
+const VERDICT_STYLE = { "here-today": ["#8fb6ff","rgba(106,160,255,0.14)"], "adopt-now": ["#5fe0aa","rgba(61,220,151,0.14)"], "defer": ["#ffce6b","rgba(255,193,77,0.14)"], "target": ["#d3b0ff","rgba(200,155,255,0.16)"] };
+
+let active = 0;
+let panelMode = 'summary';   /* 'summary' | 'detail' */
+let selectedId = null;
+const stage = document.getElementById('stage');
+const stageInner = document.getElementById('stage-inner');
+const stageWrap = document.getElementById('stage-wrap');
+
+function sysOf(k) { return SYSTEMS[k] || SYSTEMS.external; }
+function center(n) { return { x: PAD + n.x * CELL_X, y: PAD + n.y * CELL_Y }; }
+
+/* global bounds so the canvas stays stable when toggling versions */
+function computeBounds() {
+  let maxX = 0, maxY = 0;
+  REVIEW.versions.forEach(v => v.nodes.forEach(n => { maxX = Math.max(maxX, n.x); maxY = Math.max(maxY, n.y); }));
+  stage.style.width  = (PAD * 2 + maxX * CELL_X) + 'px';
+  stage.style.height = (PAD * 2 + maxY * CELL_Y + 40) + 'px';
+}
+
+/* shorten an edge so it touches card edges, not centers */
+function trim(a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 1;
+  const ux = dx / len, uy = dy / len;
+  const ts = Math.min(NODE_HW / (Math.abs(ux) || 1e-6), NODE_HH / (Math.abs(uy) || 1e-6)) + 4;
+  const te = Math.min(NODE_HW / (Math.abs(ux) || 1e-6), NODE_HH / (Math.abs(uy) || 1e-6)) + 10;
+  return { sx: a.x + ux * ts, sy: a.y + uy * ts, ex: b.x - ux * te, ey: b.y - uy * te, ux, uy };
+}
+
+function buildTabs() {
+  document.getElementById('tabs').innerHTML = REVIEW.versions.map((v, i) => {
+    const [bcls, blab] = BADGE[v.verdict.status] || BADGE["target"];
+    const [vc] = VERDICT_STYLE[v.verdict.status] || VERDICT_STYLE["target"];
+    return `<div class="tab" data-i="${i}" style="--tc:${vc}" onclick="setVer(${i})">
+      <div class="vnum">V${v.id}</div>
+      <div class="vmeta"><span class="vname">${v.name}</span><span class="vtag">${v.tagline}</span></div>
+      <span class="vbadge ${bcls}">${blab}</span>
+    </div>`;
+  }).join('');
+}
+
+function buildLegend() {
+  const used = REVIEW.systems && REVIEW.systems.length ? REVIEW.systems
+    : [...new Set(REVIEW.versions.flatMap(v => v.nodes.map(n => n.system)))];
+  document.getElementById('legend').innerHTML = used.map(k => {
+    const s = sysOf(k);
+    return `<span class="chip"><i class="ti ${s.icon}" style="color:${s.color}"></i>${s.label}</span>`;
+  }).join('');
+}
+
+function renderStage(v) {
+  const byId = Object.fromEntries(v.nodes.map(n => [n.id, n]));
+  let html = '';
+
+  /* groups (behind everything) */
+  (v.groups || []).forEach(g => {
+    const pts = g.nodes.map(id => byId[id]).filter(Boolean).map(center);
+    if (!pts.length) return;
+    const gc = GROUP_COLOR[g.kind] || GROUP_COLOR.boundary;
+    const minX = Math.min(...pts.map(p => p.x)) - (NODE_HW + 30);
+    const maxX = Math.max(...pts.map(p => p.x)) + (NODE_HW + 30);
+    const minY = Math.min(...pts.map(p => p.y)) - (NODE_HH + 40);
+    const maxY = Math.max(...pts.map(p => p.y)) + (NODE_HH + 26);
+    html += `<div class="group" style="--gc:${gc}; left:${minX}px; top:${minY}px; width:${maxX-minX}px; height:${maxY-minY}px;">
+      <span class="glabel">${g.label}</span></div>`;
+  });
+
+  /* edges as one SVG */
+  let paths = '', heads = '', labels = '';
+  (v.edges || []).forEach(e => {
+    const a = byId[e.from], b = byId[e.to];
+    if (!a || !b) return;
+    const g = trim(center(a), center(b));
+    const kind = e.kind || 'sync';
+    const col = KIND_RAW[kind] || KIND_RAW.sync;
+    const dashed = kind === 'fail';
+    const anim = kind === 'async' ? ' anim' : '';
+    /* slight curve for visual separation */
+    const mx = (g.sx + g.ex) / 2, my = (g.sy + g.ey) / 2;
+    const nx = -(g.ey - g.sy), ny = (g.ex - g.sx);
+    const nl = Math.hypot(nx, ny) || 1;
+    const bow = 16;
+    const cx = mx + (nx / nl) * bow, cy = my + (ny / nl) * bow;
+    paths += `<path class="edge-path${anim}" d="M ${g.sx} ${g.sy} Q ${cx} ${cy} ${g.ex} ${g.ey}" stroke="${col}" ${dashed ? 'stroke-dasharray="6 5"' : ''}/>`;
+    /* arrowhead at end, aimed along the curve's final segment (control -> end) */
+    const adx = g.ex - cx, ady = g.ey - cy, al = Math.hypot(adx, ady) || 1;
+    const ux = adx / al, uy = ady / al, px = -uy, py = ux, s = 8;
+    heads += `<polygon class="edge-head" fill="${col}" points="${g.ex},${g.ey} ${g.ex-ux*s*1.6+px*s},${g.ey-uy*s*1.6+py*s} ${g.ex-ux*s*1.6-px*s},${g.ey-uy*s*1.6-py*s}"/>`;
+    if (e.label) {
+      const lx = cx * 0.5 + mx * 0.5, ly = cy * 0.5 + my * 0.5;
+      labels += `<div class="edge-label" style="--el:${col}; left:${lx}px; top:${ly}px;">${e.label}</div>`;
+    }
+  });
+  html += `<svg class="edges-svg">${paths}${heads}</svg>${labels}`;
+
+  /* nodes */
+  v.nodes.forEach(n => {
+    const s = sysOf(n.system);
+    const c = center(n);
+    const isNew = n.status === 'new';
+    html += `<div class="node ${isNew ? 'is-new' : ''}" data-id="${n.id}" style="--c:${s.color}; left:${c.x}px; top:${c.y}px;" onclick="selectNode('${n.id}')">
+      ${isNew ? '<span class="newtag">NEW</span>' : ''}
+      <div class="card"><i class="ti ${s.icon}"></i></div>
+      <div class="nlabel">${n.label}</div>
+      ${n.sublabel ? `<div class="nsub">${n.sublabel}</div>` : ''}
+    </div>`;
+  });
+
+  stageInner.innerHTML = html;
+}
+
+function renderPanel() {
+  const v = REVIEW.versions[active];
+  const [vc, vbg] = VERDICT_STYLE[v.verdict.status] || VERDICT_STYLE["target"];
+  const [, blab] = BADGE[v.verdict.status] || BADGE["target"];
+
+  const header = `
+    <div class="p-eyebrow"><span>Version ${v.id} of ${REVIEW.versions.length}</span></div>
+    <div class="p-verdict" style="color:${vc}; background:${vbg}"><i class="ti ti-flag-3"></i>${blab}</div>
+    <div class="p-title">${v.name}</div>
+    <div class="p-tag">${v.tagline}</div>
+    <div class="p-toggle">
+      <button class="${panelMode === 'summary' ? 'on' : ''}" onclick="setMode('summary')">Summary</button>
+      <button class="${panelMode === 'detail' ? 'on' : ''}" onclick="setMode('detail')">Detail</button>
+    </div>`;
+
+  let body;
+  if (panelMode === 'summary') {
+    body = `
+      <div class="p-sec"><div class="lab lab-adds"><i class="ti ti-plus"></i>What this adds</div><div class="txt">${v.adds}</div></div>
+      ${v.breaks ? `<div class="p-sec"><div class="lab lab-break"><i class="ti ti-alert-triangle"></i>Where it breaks</div><div class="txt">${v.breaks}</div></div>` : ''}
+      ${v.new_problem ? `<div class="p-sec"><div class="lab lab-new"><i class="ti ti-arrow-guide"></i>New problem</div><div class="txt">${v.new_problem}</div></div>` : ''}
+      <div class="p-sec"><div class="lab lab-verd"><i class="ti ti-target-arrow"></i>Verdict</div><div class="txt">${v.verdict.note}</div></div>
+      <div class="p-hint">Switch to <b>Detail</b> for every component, or click a node. <kbd>&larr;</kbd> <kbd>&rarr;</kbd> switch versions. Drag to pan.</div>`;
+  } else {
+    const items = v.nodes.map(n => {
+      const s = sysOf(n.system);
+      const badge = n.status === 'new' ? '<span class="d-badge d-new">new</span>'
+        : n.status === 'changed' ? '<span class="d-badge d-chg">changed</span>' : '';
+      return `<div class="d-item${n.id === selectedId ? ' sel' : ''}" id="ditem-${n.id}" style="--c:${s.color}" onclick="selectNode('${n.id}')">
+        <div class="d-head">
+          <span class="d-ico"><i class="ti ${s.icon}"></i></span>
+          <span class="d-name">${n.label}</span>
+          ${n.sublabel ? `<span class="d-sub">${n.sublabel}</span>` : ''}
+          ${badge}
+        </div>
+        <div class="d-note${n.note ? '' : ' d-empty'}">${n.note || 'No component-specific note.'}</div>
+      </div>`;
+    }).join('');
+    body = `<div class="d-hint">Components in this version &middot; ${v.nodes.length}</div>${items}`;
+  }
+
+  document.getElementById('panel-inner').innerHTML = header + body;
+}
+
+function setMode(m) {
+  panelMode = m;
+  renderPanel();
+  if (m === 'detail' && selectedId) {
+    const el = document.getElementById('ditem-' + selectedId);
+    if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+}
+
+function highlight() {
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', +t.dataset.i === active));
+  document.getElementById('prev').disabled = active === 0;
+  document.getElementById('next').disabled = active === REVIEW.versions.length - 1;
+}
+
+function setVer(i) {
+  active = Math.max(0, Math.min(REVIEW.versions.length - 1, i));
+  const v = REVIEW.versions[active];
+  selectedId = null;
+  stageInner.style.opacity = '0';
+  setTimeout(() => {
+    renderStage(v);
+    renderPanel();
+    stageInner.style.opacity = '1';
+  }, 130);
+  highlight();
+}
+function goVer(d) { setVer(active + d); }
+
+function selectNode(id) {
+  selectedId = id;
+  panelMode = 'detail';
+  document.querySelectorAll('.node').forEach(n => n.classList.toggle('sel', n.dataset.id === id));
+  renderPanel();
+  const el = document.getElementById('ditem-' + id);
+  if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+/* drag-to-pan */
+(function () {
+  let down = false, sx = 0, sy = 0, sl = 0, st = 0, moved = false;
+  stageWrap.addEventListener('mousedown', e => {
+    if (e.target.closest('.node')) return; /* let node clicks through */
+    down = true; moved = false; sx = e.clientX; sy = e.clientY; sl = stageWrap.scrollLeft; st = stageWrap.scrollTop;
+    stageWrap.classList.add('grabbing');
+  });
+  window.addEventListener('mousemove', e => {
+    if (!down) return;
+    const dx = e.clientX - sx, dy = e.clientY - sy;
+    if (Math.abs(dx) + Math.abs(dy) > 3) moved = true;
+    stageWrap.scrollLeft = sl - dx; stageWrap.scrollTop = st - dy;
+  });
+  window.addEventListener('mouseup', () => { down = false; stageWrap.classList.remove('grabbing'); });
+})();
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); goVer(1); }
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); goVer(-1); }
+});
+
+function init() {
+  document.getElementById('r-title').textContent = REVIEW.review_title;
+  document.getElementById('r-summary').textContent = REVIEW.summary;
+  document.getElementById('r-scale').textContent = REVIEW.target_scale;
+  computeBounds(); buildTabs(); buildLegend();
+  setVer((REVIEW.grounding && REVIEW.grounding.current_version)
+    ? Math.max(0, REVIEW.versions.findIndex(v => v.id === REVIEW.grounding.current_version))
+    : 0);
+}
+init();
+</script>
+</body>
+</html>

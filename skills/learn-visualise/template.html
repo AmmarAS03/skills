@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flow</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.5.0/dist/tabler-icons.min.css">
+<style>
+  :root {
+    --bg: #0a0e16;
+    --bg-grid: rgba(120, 160, 220, 0.04);
+    --panel: #111824;
+    --panel-2: #0e1420;
+    --edge: rgba(140, 170, 220, 0.12);
+    --edge-strong: rgba(140, 170, 220, 0.28);
+    --text: #e6ecf5;
+    --text-dim: #8a98ad;
+    --text-faint: #56627a;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    overflow: hidden;
+  }
+
+  body {
+    background-image:
+      linear-gradient(var(--bg-grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--bg-grid) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+
+  .app { height: 100vh; display: flex; flex-direction: column; }
+
+  /* ---- header ---- */
+  .head {
+    padding: 18px 28px 14px;
+    border-bottom: 1px solid var(--edge);
+    display: flex; align-items: baseline; gap: 16px;
+    flex-wrap: wrap;
+    background: linear-gradient(180deg, rgba(255,255,255,0.015), transparent);
+  }
+  .head h1 {
+    font-size: 17px; font-weight: 600; letter-spacing: -0.01em;
+  }
+  .head .sub {
+    font-size: 13px; color: var(--text-dim); font-weight: 400;
+    max-width: 620px; line-height: 1.5;
+  }
+  .head .eyebrow {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.18em;
+    text-transform: uppercase; color: var(--text-faint);
+    display: flex; align-items: center; gap: 7px;
+  }
+  .head .eyebrow .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: #3ddc97; box-shadow: 0 0 8px #3ddc97;
+    animation: pulse-dot 2s ease-in-out infinite;
+  }
+  @keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+  /* ---- legend ---- */
+  .legend {
+    display: flex; gap: 8px; flex-wrap: wrap; padding: 10px 28px;
+    border-bottom: 1px solid var(--edge);
+  }
+  .legend .chip {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11px; font-family: var(--mono); color: var(--text-dim);
+    padding: 4px 9px; border-radius: 7px;
+    border: 1px solid var(--edge); background: var(--panel-2);
+  }
+  .legend .chip i { font-size: 13px; }
+
+  /* ---- main split ---- */
+  .body { flex: 1; display: flex; min-height: 0; }
+
+  /* ---- the flow track (scroll x AND y) ---- */
+  .track-wrap {
+    flex: 1; overflow: auto; position: relative;
+    scroll-behavior: smooth;
+  }
+  .track-wrap::-webkit-scrollbar { width: 9px; height: 9px; }
+  .track-wrap::-webkit-scrollbar-thumb {
+    background: var(--edge-strong); border-radius: 5px;
+  }
+  .track-wrap::-webkit-scrollbar-track { background: transparent; }
+
+  .track {
+    display: flex; align-items: flex-start;
+    gap: 0; padding: 64px 80px; min-width: max-content;
+  }
+
+  /* a step node */
+  .node {
+    position: relative;
+    width: 248px; flex-shrink: 0;
+    cursor: pointer;
+    transition: transform 0.35s cubic-bezier(.2,.7,.3,1);
+  }
+  .node-card {
+    background: var(--panel);
+    border: 1px solid var(--edge);
+    border-radius: 14px;
+    padding: 0; overflow: hidden;
+    transition: border-color 0.3s, box-shadow 0.3s, transform 0.3s;
+    position: relative;
+  }
+  .node.active .node-card {
+    transform: translateY(-4px);
+  }
+  .node-card .bar {
+    height: 3px; width: 100%;
+    background: var(--c, #6aa0ff);
+    transition: height 0.3s;
+  }
+  .node.active .node-card .bar { height: 5px; }
+
+  .node-head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 13px 15px 9px;
+  }
+  .node-ico {
+    width: 30px; height: 30px; border-radius: 9px;
+    display: grid; place-items: center; flex-shrink: 0;
+    background: color-mix(in srgb, var(--c) 16%, transparent);
+    color: var(--c);
+    border: 1px solid color-mix(in srgb, var(--c) 30%, transparent);
+  }
+  .node-ico i { font-size: 17px; }
+  .node-syslabel {
+    font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--c);
+    opacity: 0.85;
+  }
+  .node-idx {
+    margin-left: auto; font-family: var(--mono); font-size: 11px;
+    color: var(--text-faint);
+  }
+  .node-title {
+    padding: 0 15px 14px;
+    font-size: 14px; font-weight: 550; line-height: 1.35;
+    letter-spacing: -0.01em;
+  }
+
+  /* connector between nodes: a labelled flow lane.
+     The label rides ON the wire as a pill (not floating above it) and
+     truncates past a max width — so an over-long `data` string degrades
+     to an ellipsis instead of overflowing. Full value still shows in the
+     side panel's "passes on" row. */
+  .conn {
+    flex-shrink: 0; align-self: flex-start;
+    margin-top: 74px; position: relative; height: 38px;
+    min-width: 104px; padding: 0 16px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  /* the wire, fading toward the source step's colour */
+  .conn .line {
+    position: absolute; left: 0; right: 0; top: 50%;
+    height: 2px; transform: translateY(-50%);
+    background: linear-gradient(
+      90deg,
+      var(--edge-strong) 0%,
+      color-mix(in srgb, var(--c, #6aa0ff) 60%, var(--edge-strong)) 100%);
+  }
+  .conn .data-tag {
+    position: relative; z-index: 2;
+    display: inline-flex; align-items: center; gap: 7px;
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.01em;
+    color: var(--text); background: var(--panel);
+    border: 1px solid color-mix(in srgb, var(--c, #6aa0ff) 38%, var(--edge));
+    border-radius: 999px; padding: 4px 11px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.28); max-width: 240px;
+  }
+  .conn .data-tag--bare { padding: 4px; }
+  .conn .data-txt {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  /* pulsing dot = data in transit */
+  .conn .data-dot {
+    width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+    background: var(--c, #6aa0ff);
+    box-shadow: 0 0 8px 1px color-mix(in srgb, var(--c, #6aa0ff) 80%, transparent);
+    animation: dataflow 1.6s ease-in-out infinite;
+  }
+  @keyframes dataflow {
+    0%, 100% { opacity: 0.35; transform: scale(0.8); }
+    50%      { opacity: 1;    transform: scale(1.2); }
+  }
+  .conn .arrow {
+    position: absolute; right: -4px; top: 50%; transform: translateY(-50%);
+    color: color-mix(in srgb, var(--c, #6aa0ff) 60%, var(--edge-strong));
+    font-size: 13px; z-index: 1;
+  }
+
+  /* branch (failure path) hanging below a node */
+  .branch {
+    margin: 14px 12px 0; padding: 10px 12px;
+    border: 1px dashed color-mix(in srgb, #ff6b6b 40%, var(--edge));
+    border-radius: 10px;
+    background: color-mix(in srgb, #ff6b6b 7%, var(--panel-2));
+  }
+  .branch .blabel {
+    font-family: var(--mono); font-size: 9px; letter-spacing: 0.12em;
+    text-transform: uppercase; color: #ff8585; display:flex; gap:5px; align-items:center;
+    margin-bottom: 4px;
+  }
+  .branch .bcond { font-size: 11.5px; color: var(--text-dim); line-height: 1.4; }
+  .branch .bout { font-size: 11.5px; color: var(--text); line-height: 1.4; margin-top: 3px; }
+
+  /* ---- side explanation panel ---- */
+  .panel {
+    width: 340px; flex-shrink: 0;
+    border-left: 1px solid var(--edge);
+    background: var(--panel-2);
+    display: flex; flex-direction: column;
+    overflow-y: auto;
+  }
+  .panel-inner { padding: 24px 24px 32px; }
+  .panel .p-eyebrow {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.16em;
+    text-transform: uppercase; color: var(--c, var(--text-faint));
+    margin-bottom: 12px; display: flex; align-items: center; gap: 8px;
+  }
+  .panel .p-ico {
+    width: 38px; height: 38px; border-radius: 11px; display:grid; place-items:center;
+    background: color-mix(in srgb, var(--c) 16%, transparent);
+    color: var(--c); border: 1px solid color-mix(in srgb, var(--c) 30%, transparent);
+    margin-bottom: 16px;
+  }
+  .panel .p-ico i { font-size: 21px; }
+  .panel .p-title {
+    font-size: 19px; font-weight: 600; line-height: 1.25;
+    letter-spacing: -0.015em; margin-bottom: 14px;
+  }
+  .panel .p-detail {
+    font-size: 14px; line-height: 1.65; color: var(--text-dim);
+    margin-bottom: 22px;
+  }
+  .panel .p-meta { display: flex; flex-direction: column; gap: 10px; }
+  .panel .p-row {
+    display: flex; gap: 10px; align-items: flex-start;
+    font-family: var(--mono); font-size: 11.5px;
+    padding: 10px 12px; border-radius: 9px;
+    background: var(--panel); border: 1px solid var(--edge);
+  }
+  .panel .p-row i { color: var(--text-faint); font-size: 14px; margin-top: 1px; }
+  .panel .p-row .k { color: var(--text-faint); }
+  .panel .p-row .v { color: var(--text); word-break: break-all; }
+  .panel .p-row span { display:block; }
+
+  /* ---- footer controls ---- */
+  .controls {
+    padding: 12px 28px; border-top: 1px solid var(--edge);
+    display: flex; align-items: center; gap: 14px;
+    background: var(--panel-2);
+  }
+  .btn {
+    display: flex; align-items: center; gap: 6px;
+    font-family: var(--mono); font-size: 12px; color: var(--text);
+    padding: 8px 14px; border-radius: 9px;
+    border: 1px solid var(--edge-strong); background: var(--panel);
+    cursor: pointer; transition: background 0.2s, border-color 0.2s;
+  }
+  .btn:hover { background: #1a2435; border-color: #6aa0ff; }
+  .btn:disabled { opacity: 0.35; cursor: not-allowed; }
+  .btn i { font-size: 15px; }
+  .progress {
+    flex: 1; display: flex; gap: 5px; align-items: center;
+  }
+  .progress .seg {
+    flex: 1; height: 3px; border-radius: 2px; background: var(--edge);
+    transition: background 0.3s;
+  }
+  .progress .seg.on { background: var(--c, #6aa0ff); }
+  .counter { font-family: var(--mono); font-size: 12px; color: var(--text-dim); }
+
+  @media (prefers-reduced-motion: reduce) {
+    .conn .data-dot, .head .eyebrow .dot { animation: none; }
+    .track-wrap { scroll-behavior: auto; }
+  }
+
+  @media (max-width: 760px) {
+    .panel { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="head">
+    <div style="display:flex; flex-direction:column; gap:6px;">
+      <span class="eyebrow"><span class="dot"></span><span id="eyebrow-txt">flow trace</span></span>
+      <h1 id="flow-title">—</h1>
+    </div>
+    <p class="sub" id="flow-summary"></p>
+  </div>
+
+  <div class="legend" id="legend"></div>
+
+  <div class="body">
+    <div class="track-wrap" id="track-wrap">
+      <div class="track" id="track"></div>
+    </div>
+    <aside class="panel" id="panel">
+      <div class="panel-inner" id="panel-inner"></div>
+    </aside>
+  </div>
+
+  <div class="controls">
+    <button class="btn" id="prev" onclick="go(-1)"><i class="ti ti-arrow-left"></i>Prev</button>
+    <div class="progress" id="progress"></div>
+    <span class="counter" id="counter"></span>
+    <button class="btn" id="next" onclick="go(1)">Next<i class="ti ti-arrow-right"></i></button>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   SYSTEM REGISTRY — color + icon + label per system key.
+   Single source of truth: add a key here and the legend, nodes,
+   and panel all pick it up. Icons are Tabler icon names
+   (https://tabler.io/icons) — use the part after "ti-".
+   The learn-visualise skill may append entries here when a
+   project uses a system not yet listed. Keys are referenced by
+   the `system` field in each flow step.
+   ============================================================ */
+const SYSTEMS = {
+  /* --- generic layers (use when a specific tech isn't listed) --- */
+  mobile:    { label: "Mobile app",    color: "#6aa0ff", icon: "ti-device-mobile" },
+  web:       { label: "Web frontend",  color: "#5ad1e6", icon: "ti-browser" },
+  backend:   { label: "Backend",       color: "#3ddc97", icon: "ti-server-2" },
+  worker:    { label: "Worker / job",  color: "#9be564", icon: "ti-subtask" },
+  queue:     { label: "Queue",         color: "#ffc14d", icon: "ti-list-check" },
+  external:  { label: "External",      color: "#8a98ad", icon: "ti-world" },
+
+  /* --- mobile / cross-platform frameworks --- */
+  expo:      { label: "Expo",          color: "#6aa0ff", icon: "ti-device-mobile" },
+  flutter:   { label: "Flutter",       color: "#54c5f8", icon: "ti-brand-flutter" },
+  swift:     { label: "Swift / iOS",   color: "#ff8a65", icon: "ti-brand-apple" },
+  kotlin:    { label: "Kotlin / Android", color: "#a98bff", icon: "ti-brand-android" },
+
+  /* --- web frameworks --- */
+  react:     { label: "React",         color: "#61dafb", icon: "ti-brand-react" },
+  next:      { label: "Next.js",       color: "#cdd3de", icon: "ti-brand-nextjs" },
+  vue:       { label: "Vue",           color: "#42b883", icon: "ti-brand-vue" },
+  nuxt:      { label: "Nuxt",          color: "#42d392", icon: "ti-brand-nuxt" },
+  svelte:    { label: "Svelte",        color: "#ff6a3d", icon: "ti-brand-svelte" },
+  angular:   { label: "Angular",       color: "#e5556e", icon: "ti-brand-angular" },
+  astro:     { label: "Astro",         color: "#ff7e54", icon: "ti-rocket" },
+
+  /* --- backend frameworks / runtimes --- */
+  fastify:   { label: "Fastify",       color: "#7be58a", icon: "ti-bolt" },
+  express:   { label: "Express",       color: "#9be564", icon: "ti-server-2" },
+  nest:      { label: "NestJS",        color: "#ea5b8d", icon: "ti-server-2" },
+  node:      { label: "Node.js",       color: "#7fd171", icon: "ti-brand-nodejs" },
+  django:    { label: "Django",        color: "#4bbf8e", icon: "ti-brand-django" },
+  flask:     { label: "Flask",         color: "#b0b6c0", icon: "ti-flask" },
+  fastapi:   { label: "FastAPI",       color: "#3ddc97", icon: "ti-api" },
+  rails:     { label: "Rails",         color: "#ff6b6b", icon: "ti-diamond" },
+  laravel:   { label: "Laravel",       color: "#ff5c5c", icon: "ti-brand-laravel" },
+  spring:    { label: "Spring",        color: "#7be58a", icon: "ti-leaf" },
+  go:        { label: "Go",            color: "#5ad1e6", icon: "ti-brand-golang" },
+  dotnet:    { label: ".NET",          color: "#a98bff", icon: "ti-brand-c-sharp" },
+
+  /* --- databases / ORMs --- */
+  postgres:  { label: "PostgreSQL",    color: "#c89bff", icon: "ti-database" },
+  mysql:     { label: "MySQL",         color: "#7aa6ff", icon: "ti-database" },
+  sqlite:    { label: "SQLite",        color: "#9bb4d4", icon: "ti-database" },
+  mongodb:   { label: "MongoDB",       color: "#5fd58a", icon: "ti-leaf" },
+  redis:     { label: "Redis",         color: "#ff7a7a", icon: "ti-stack-2" },
+  prisma:    { label: "Prisma",        color: "#b38cff", icon: "ti-layers-linked" },
+  drizzle:   { label: "Drizzle",       color: "#7be58a", icon: "ti-layers-linked" },
+  typeorm:   { label: "TypeORM",       color: "#ff8585", icon: "ti-layers-linked" },
+
+  /* --- BaaS / auth --- */
+  firebase:  { label: "Firebase",      color: "#ffb454", icon: "ti-flame" },
+  supabase:  { label: "Supabase",      color: "#3ecf8e", icon: "ti-bolt" },
+  auth0:     { label: "Auth0",         color: "#eb7d4f", icon: "ti-lock" },
+  clerk:     { label: "Clerk",         color: "#8a7dff", icon: "ti-lock" },
+  cognito:   { label: "Cognito",       color: "#ff9d4d", icon: "ti-lock" },
+  auth:      { label: "Auth",          color: "#ffb454", icon: "ti-lock" },
+
+  /* --- object storage / CDN --- */
+  r2:        { label: "Cloudflare R2", color: "#ffa94d", icon: "ti-cloud" },
+  s3:        { label: "AWS S3",        color: "#ff9d4d", icon: "ti-cloud" },
+  gcs:       { label: "Cloud Storage", color: "#7aa6ff", icon: "ti-cloud" },
+  storage:   { label: "Object store",  color: "#ffa94d", icon: "ti-cloud" },
+
+  /* --- third-party services --- */
+  stripe:    { label: "Stripe",        color: "#9b8cff", icon: "ti-credit-card" },
+  sendgrid:  { label: "Email",         color: "#5ad1e6", icon: "ti-mail" },
+  twilio:    { label: "Twilio",        color: "#ff6b6b", icon: "ti-message" },
+  openai:    { label: "OpenAI",        color: "#76d6b5", icon: "ti-robot" },
+  anthropic: { label: "Anthropic",     color: "#d4a27f", icon: "ti-robot" },
+  webhook:   { label: "Webhook",       color: "#c89bff", icon: "ti-webhook" }
+};
+
+/* ============================================================
+   FLOW DATA — the skill replaces this object with traced JSON.
+   Sample below = the demo Google sign-in flow.
+   ============================================================ */
+const FLOW = {
+  "flow_title": "Google sign-in flow",
+  "summary": "How a user goes from tapping \u201csign in with Google\u201d to holding an app session token the backend trusts.",
+  "systems": ["mobile", "firebase", "backend", "postgres"],
+  "steps": [
+    { "id": 1, "system": "mobile", "title": "User taps \u201csign in with Google\u201d", "detail": "The login screen calls the Firebase Auth client SDK directly from the device. Nothing hits your backend yet \u2014 this exchange is between the phone and Firebase.", "file": "mobile/screens/LoginScreen.tsx", "fn": "handleGoogleSignIn()", "data": "Google credential" },
+    { "id": 2, "system": "firebase", "title": "Firebase issues an ID token", "detail": "Firebase verifies the Google credential and returns a signed JWT ID token to the client. It proves identity, but your backend hasn\u2019t seen it yet.", "file": "(external)", "fn": "signInWithCredential()", "data": "Firebase ID token (JWT)" },
+    { "id": 3, "system": "mobile", "title": "App sends token to your API", "detail": "The app attaches the ID token as a Bearer header and calls your session endpoint to exchange it for an app-level session.", "file": "mobile/api/auth.ts", "fn": "exchangeFirebaseToken(idToken)", "data": "Bearer <jwt>" },
+    { "id": 4, "system": "backend", "title": "Middleware verifies the token", "detail": "A Fastify middleware verifies the JWT signature against Firebase\u2019s public keys and extracts the user\u2019s UID before any route handler runs.", "file": "backend/middleware/verifyFirebaseToken.ts", "fn": "verifyFirebaseToken(req, reply)", "data": "verified UID", "branch": { "condition": "Signature invalid or token expired", "outcome": "Reply 401 \u2014 request stops here, never reaches the DB" } },
+    { "id": 5, "system": "postgres", "title": "Find or create the user row", "detail": "Using the verified UID, the backend queries Postgres via Prisma. First-time logins create a new row keyed on the Firebase UID.", "file": "backend/services/userService.ts", "fn": "findOrCreateUser(uid)", "data": "user record" },
+    { "id": 6, "system": "backend", "title": "Issue app session + respond", "detail": "The backend signs its own short-lived session token (separate from Firebase\u2019s), attaches the user record, and returns it. From here the app uses this token, not the Firebase one.", "file": "backend/routes/auth.ts", "fn": "POST /auth/session", "data": "app session token" }
+  ]
+};
+
+/* ============================================================
+   RENDER
+   ============================================================ */
+let active = 0;
+const trackWrap = document.getElementById('track-wrap');
+
+function sysOf(key) { return SYSTEMS[key] || SYSTEMS.external; }
+
+function buildLegend() {
+  const used = FLOW.systems && FLOW.systems.length
+    ? FLOW.systems
+    : [...new Set(FLOW.steps.map(s => s.system))];
+  document.getElementById('legend').innerHTML = used.map(k => {
+    const s = sysOf(k);
+    return `<span class="chip" style="--c:${s.color}">
+      <i class="ti ${s.icon}" style="color:${s.color}"></i>${s.label}</span>`;
+  }).join('');
+}
+
+function buildTrack() {
+  const track = document.getElementById('track');
+  let html = '';
+  FLOW.steps.forEach((step, i) => {
+    const s = sysOf(step.system);
+    html += `
+      <div class="node" data-i="${i}" style="--c:${s.color}" onclick="setActive(${i})">
+        <div class="node-card">
+          <div class="bar"></div>
+          <div class="node-head">
+            <div class="node-ico"><i class="ti ${s.icon}"></i></div>
+            <span class="node-syslabel">${s.label}</span>
+            <span class="node-idx">${String(step.id).padStart(2,'0')}</span>
+          </div>
+          <div class="node-title">${step.title}</div>
+          ${step.branch ? `
+            <div class="branch">
+              <div class="blabel"><i class="ti ti-alert-triangle"></i>if fails</div>
+              <div class="bcond">${step.branch.condition}</div>
+              <div class="bout">\u2192 ${step.branch.outcome}</div>
+            </div>` : ''}
+        </div>
+      </div>`;
+    if (i < FLOW.steps.length - 1) {
+      html += `
+        <div class="conn" style="--c:${s.color}">
+          <div class="line"></div>
+          ${step.data
+            ? `<span class="data-tag"><span class="data-dot" style="animation-delay:${(i*0.2).toFixed(2)}s"></span><span class="data-txt">${step.data}</span></span>`
+            : '<span class="data-tag data-tag--bare"><span class="data-dot"></span></span>'}
+          <i class="ti ti-chevron-right arrow"></i>
+        </div>`;
+    }
+  });
+  track.innerHTML = html;
+}
+
+function buildProgress() {
+  document.getElementById('progress').innerHTML =
+    FLOW.steps.map((_, i) => `<div class="seg" data-seg="${i}"></div>`).join('');
+}
+
+function renderPanel() {
+  const step = FLOW.steps[active];
+  const s = sysOf(step.system);
+  document.getElementById('panel-inner').style.setProperty('--c', s.color);
+  document.getElementById('panel-inner').innerHTML = `
+    <div class="p-eyebrow"><span>step ${step.id} of ${FLOW.steps.length}</span></div>
+    <div class="p-ico"><i class="ti ${s.icon}"></i></div>
+    <div class="p-eyebrow" style="margin-bottom:8px">${s.label}</div>
+    <div class="p-title">${step.title}</div>
+    <div class="p-detail">${step.detail}</div>
+    <div class="p-meta">
+      ${step.file ? `<div class="p-row"><i class="ti ti-file-code"></i><span><span class="k">file</span><span class="v">${step.file}</span></span></div>` : ''}
+      ${step.fn ? `<div class="p-row"><i class="ti ti-code"></i><span><span class="k">function</span><span class="v">${step.fn}</span></span></div>` : ''}
+      ${step.data ? `<div class="p-row"><i class="ti ti-arrow-bar-right"></i><span><span class="k">passes on</span><span class="v">${step.data}</span></span></div>` : ''}
+      ${step.branch ? `<div class="p-row" style="border-color:color-mix(in srgb,#ff6b6b 35%,var(--edge))"><i class="ti ti-alert-triangle" style="color:#ff8585"></i><span><span class="k" style="color:#ff8585">on failure</span><span class="v">${step.branch.outcome}</span></span></div>` : ''}
+    </div>`;
+}
+
+function highlight() {
+  document.querySelectorAll('.node').forEach(n => {
+    n.classList.toggle('active', +n.dataset.i === active);
+  });
+  document.querySelectorAll('.seg').forEach(seg => {
+    const s = sysOf(FLOW.steps[active].system);
+    const on = +seg.dataset.seg <= active;
+    seg.classList.toggle('on', on);
+    seg.style.setProperty('--c', s.color);
+  });
+  document.getElementById('counter').textContent =
+    `${String(active+1).padStart(2,'0')} / ${String(FLOW.steps.length).padStart(2,'0')}`;
+  document.getElementById('prev').disabled = active === 0;
+  document.getElementById('next').disabled = active === FLOW.steps.length - 1;
+}
+
+function scrollToActive() {
+  const node = document.querySelector(`.node[data-i="${active}"]`);
+  if (!node) return;
+  const wrap = trackWrap;
+  const nodeCenter = node.offsetLeft + node.offsetWidth / 2;
+  wrap.scrollTo({ left: nodeCenter - wrap.clientWidth / 2, behavior: 'smooth' });
+}
+
+function setActive(i) {
+  active = Math.max(0, Math.min(FLOW.steps.length - 1, i));
+  renderPanel(); highlight(); scrollToActive();
+}
+function go(d) { setActive(active + d); }
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); go(1); }
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); go(-1); }
+});
+
+function init() {
+  document.getElementById('flow-title').textContent = FLOW.flow_title;
+  document.getElementById('flow-summary').textContent = FLOW.summary;
+  buildLegend(); buildTrack(); buildProgress();
+  setActive(0);
+}
+init();
+</script>
+</body>
+</html>

@@ -1,0 +1,116 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SystemDesignReview",
+  "description": "A grounded, evolve-under-load system-design review of one flow. The flow is broken into 2-5 VERSIONS, each an incremental architecture that fixes the previous version's failure and (usually) introduces the next problem. Each version has a positioned node/edge/group graph. The renderer (template.html) consumes this object directly as REVIEW.",
+  "type": "object",
+  "required": ["review_title", "summary", "target_scale", "systems", "versions"],
+  "properties": {
+    "review_title": {
+      "type": "string",
+      "description": "Short human title for the flow under review, e.g. 'Mobile sign-up flow' or 'Video upload + commit'."
+    },
+    "summary": {
+      "type": "string",
+      "description": "1-2 sentence plain-language description of the flow and what this review evolves it toward."
+    },
+    "target_scale": {
+      "type": "string",
+      "description": "The scale this review is calibrated to. Default posture is 'next 10x' from where the app is today. State concrete numbers, e.g. 'Next 10x: ~50k DAU, ~2k signups/day, ~800 video uploads/day'."
+    },
+    "grounding": {
+      "type": "object",
+      "description": "Where this flow lives in the real codebase. Every claim about the CURRENT state must trace to real files you opened.",
+      "properties": {
+        "entry": { "type": "string", "description": "Entry-point file:line, e.g. 'meels/app/(auth)/signup.tsx:42'." },
+        "current_version": { "type": "integer", "description": "Which version id ('you are here') most closely matches what the code does TODAY." },
+        "notes": { "type": "string", "description": "1-3 sentences on how the current code maps to version 1, with file:line citations." }
+      }
+    },
+    "systems": {
+      "type": "array",
+      "description": "Distinct systems/layers this review touches, in first-appearance order. Drives the legend. Each must be a key in the SYSTEMS registry in template.html.",
+      "items": { "type": "string" }
+    },
+    "versions": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 5,
+      "description": "The ordered versions. DO NOT pad to 4: use exactly as many as the flow needs (2-5). Each version fixes the previous one's `breaks` and usually introduces a `new_problem`.",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "tagline", "adds", "verdict", "nodes", "edges"],
+        "properties": {
+          "id": { "type": "integer", "description": "1-based version number." },
+          "name": { "type": "string", "description": "Short version name, e.g. 'Naive synchronous', 'Add a queue', 'Transactional outbox'." },
+          "tagline": { "type": "string", "description": "<=6 word subtitle shown under the version name, e.g. 'Everything in the request'." },
+          "adds": { "type": "string", "description": "2-4 sentences: what this version introduces vs the previous one, and why. Plain language." },
+          "breaks": { "type": "string", "description": "Where this version fails AND the concrete scale/condition that triggers it, e.g. 'Email provider slow (~2s) or down blocks the request; at ~300 concurrent signups every API worker is tied up'. Omit only for the final, terminal version if it has no material failure at target scale." },
+          "new_problem": { "type": "string", "description": "Optional. The new problem this fix introduces, which the next version solves. Omit on the final version." },
+          "verdict": {
+            "type": "object",
+            "required": ["status", "note"],
+            "description": "The stack recommendation for THIS version, calibrated to target_scale. This is what makes the review actionable and anti-over-engineering.",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": ["here-today", "adopt-now", "defer", "target"],
+                "description": "here-today = closest to current code; adopt-now = worth doing before target scale; defer = don't build until a stated threshold; target = the recommended end state for target_scale."
+              },
+              "note": { "type": "string", "description": "1-2 sentences justifying the status, grounded in the stack ledger, e.g. 'Do this with a Postgres outbox table + the existing cron worker; you do NOT need SQS until >X jobs/min.'" }
+            }
+          },
+          "nodes": {
+            "type": "array",
+            "minItems": 2,
+            "description": "Components in this version's architecture, positioned on a grid.",
+            "items": {
+              "type": "object",
+              "required": ["id", "system", "label", "x", "y"],
+              "properties": {
+                "id": { "type": "string", "description": "Stable id, unique within the version. Reuse the SAME id across versions for a component that persists (keeps it in place when toggling)." },
+                "system": { "type": "string", "description": "Key in the SYSTEMS registry (drives color + icon)." },
+                "label": { "type": "string", "description": "Main label, e.g. 'account_setup', 'Database', 'Send email'." },
+                "sublabel": { "type": "string", "description": "Optional smaller label, e.g. 'SQS', 'Lambda', '(user)', 'visibility timeout'." },
+                "x": { "type": "number", "description": "Grid column (fractional allowed). Columns typically 0,1,2,3. Same component should keep the same x/y across versions." },
+                "y": { "type": "number", "description": "Grid row (fractional allowed), increasing downward. Entry point at top." },
+                "status": { "type": "string", "enum": ["new", "changed"], "description": "Optional. 'new' = introduced in this version (gets a glow + NEW badge); 'changed' = same node, new behavior." },
+                "note": { "type": "string", "description": "Optional. 1-3 sentences shown when the node is clicked: what it does and any real file:line if it maps to Meels code." }
+              }
+            }
+          },
+          "edges": {
+            "type": "array",
+            "description": "Directed connections between nodes in this version.",
+            "items": {
+              "type": "object",
+              "required": ["from", "to"],
+              "properties": {
+                "from": { "type": "string", "description": "Source node id." },
+                "to": { "type": "string", "description": "Target node id." },
+                "label": { "type": "string", "description": "Optional short label on the edge, e.g. 'submit', 'enqueue', 'after 5 fails'." },
+                "kind": {
+                  "type": "string",
+                  "enum": ["sync", "async", "write", "read", "fail"],
+                  "description": "sync=blocking gray; async=non-blocking blue (marching-ants); write=purple; read=cyan; fail=red dashed (e.g. -> DLQ). Default sync."
+                }
+              }
+            }
+          },
+          "groups": {
+            "type": "array",
+            "description": "Optional dashed bounding boxes around related nodes, e.g. a transactional boundary or a deployment region.",
+            "items": {
+              "type": "object",
+              "required": ["label", "nodes"],
+              "properties": {
+                "label": { "type": "string", "description": "e.g. 'One transaction', 'Same VPC'." },
+                "nodes": { "type": "array", "items": { "type": "string" }, "description": "Node ids this box encloses." },
+                "kind": { "type": "string", "enum": ["transaction", "boundary", "region"], "description": "Drives the box accent color. Default boundary." }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

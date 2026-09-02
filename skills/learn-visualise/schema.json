@@ -1,0 +1,74 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LearnVisualiseFlow",
+  "description": "A traced code flow, broken into ordered steps. Each step is grounded in a real file + function from the codebase. The renderer (template.html) consumes this directly.",
+  "type": "object",
+  "required": ["flow_title", "summary", "steps"],
+  "properties": {
+    "flow_title": {
+      "type": "string",
+      "description": "Short human title for the whole flow, e.g. 'Google sign-in flow' or 'Video homepage feed'."
+    },
+    "summary": {
+      "type": "string",
+      "description": "1-2 sentence plain-language overview of what this flow does end to end."
+    },
+    "systems": {
+      "type": "array",
+      "description": "The distinct systems/layers this flow touches, in the order they first appear. Used to build the legend. Each must reference a key from the fixed system enum below.",
+      "items": {
+        "type": "string",
+        "enum": ["mobile", "web", "backend", "fastify", "firebase", "postgres", "prisma", "redis", "r2", "external"]
+      }
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 2,
+      "description": "Ordered steps of the flow. Each step is one meaningful unit of work in one system.",
+      "items": {
+        "type": "object",
+        "required": ["id", "system", "title", "detail"],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "1-based sequential index."
+          },
+          "system": {
+            "type": "string",
+            "enum": ["mobile", "web", "backend", "fastify", "firebase", "postgres", "prisma", "redis", "r2", "external"],
+            "description": "Which system this step happens in. Drives the color + icon in the renderer."
+          },
+          "title": {
+            "type": "string",
+            "description": "Short imperative/declarative title, <=8 words. e.g. 'Middleware verifies the JWT'."
+          },
+          "detail": {
+            "type": "string",
+            "description": "2-4 sentences explaining what happens here and why, in plain language. This is the 'explanation box' that travels with the data."
+          },
+          "file": {
+            "type": "string",
+            "description": "Real repo-relative path of the file where this happens, e.g. 'backend/src/middleware/verifyToken.ts'. Use '(external)' for third-party systems with no local file."
+          },
+          "fn": {
+            "type": "string",
+            "description": "The actual function / route / method name involved, e.g. 'verifyFirebaseToken(req, reply)' or 'POST /auth/session'."
+          },
+          "data": {
+            "type": "string",
+            "description": "Optional. What data is flowing OUT of this step into the next, e.g. 'Firebase ID token (JWT)' or 'verified UID'. Rendered on the connector between steps."
+          },
+          "branch": {
+            "type": "object",
+            "description": "Optional. A failure / alternate path off this step (e.g. token invalid -> 401). Rendered as a side-branch.",
+            "required": ["condition", "outcome"],
+            "properties": {
+              "condition": { "type": "string", "description": "e.g. 'Signature invalid or expired'" },
+              "outcome": { "type": "string", "description": "e.g. 'Reply 401, request stops here'" }
+            }
+          }
+        }
+      }
+    }
+  }
+}
